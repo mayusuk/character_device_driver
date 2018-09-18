@@ -1,18 +1,11 @@
-KDIR:=/opt/iot-devkit/1.7.2/sysroots/i586-poky-linux/usr/src/kernel
-#PWD:= $(shell pwd)
 
-CC = i586-poky-linux-gcc
-ARCH = x86
-CROSS_COMPILE = i586-poky-linux-
-SROOT=/opt/iot-devkit/1.7.2/sysroots/i586-poky-linux
-
-APP = gmem_tester
-
+APP = hashtable
+Current = $(PWD)
 obj-m:= assignment_1.o
 
 all:
-	make ARCH=x86 CROSS_COMPILE=i586-poky-linux- -C $(KDIR) M=$(PWD) modules
-	i586-poky-linux-gcc -o $(APP) main.c --sysroot=$(SROOT)
+	make -C /lib/modules/4.15.0-34-generic/build M=/home/mayur/Desktop/EOSI/Assignment-1/character_device_driver modules
+
 
 clean:
 	rm -f *.ko
