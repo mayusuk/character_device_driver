@@ -1,12 +1,19 @@
+KDIR:=/opt/iot-devkit/1.7.2/sysroots/i586-poky-linux/usr/src/kernel
+#PWD:= $(shell pwd)
 
-APP = hashtable
-Current = $(PWD)
-obj-m:= assignment_1.o
+CC = i586-poky-linux-gcc
+ARCH = x86
+CROSS_COMPILE = i586-poky-linux-
+SROOT=/opt/iot-devkit/1.7.2/sysroots/i586-poky-linux
+
+APP_HASHTABLE = hashtable
+APP_MPROBE = mprobe
+obj-m += assignment_1.o krpobe.o
 
 all:
-	make -C /lib/modules/4.15.0-34-generic/build M=/home/mayur/Desktop/EOSI/Assignment-1/character_device_driver modules
-
-
+	make ARCH=x86 CROSS_COMPILE=i586-poky-linux- -C $(KDIR) M=/home/mayur/Desktop/EOSI/Assignment-1/character_device_driver modules
+	i586-poky-linux-gcc -o $(APP_HASHTABLE) main.c --sysroot=$(SROOT)
+	i586-poky-linux-gcc -o $(APP_MPROBE) main_mprobe.c --sysroot=$(SROOT)
 clean:
 	rm -f *.ko
 	rm -f *.o

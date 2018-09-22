@@ -6,7 +6,7 @@
 #include <linux/slab.h>
 #include <linux/device.h>
 #include <linux/hashtable.h>
-#include <asm-generic/errno.h>
+#include <linux/errno.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
 #include "ioctl_struct.h"
@@ -15,146 +15,160 @@
 #define DEVICE_1_NAME "ht530_tbl_1"
 #define CLASS_NAME    "ht530_drv"
 
-#define find_node(hash, hashtable_node_obj, hashtable_pt, key) 					\
-	hash_for_each_possible(hash, hashtable_node_obj, hashtable_pt, key ) 
+#define find_node(hash, node, hashtable_pt, key) 					   \
+	hash_for_each_possible(hash, node, hashtable_pt, key)
 
-#define iterate_bucket(hash, hashtable_node_obj, bucket_no, member) \
-	if(bucket_no > HASH_SIZE(hash)) return -1; \
+#define iterate_bucket(hash, hashtable_node_obj, bucket_no, member)    \
 	hlist_for_each_entry(hashtable_node_obj, &hash[bucket_no], member)
 
 static struct hashtable_object{
-	struct data obj;
+	struct object_data obj;
 	struct hlist_node hashtable_pt;
 };
 
 static struct hashtable_dev {
 	struct cdev cdev;
 	char device_name[15];
-	struct hlist_head hash[128];
+	struct hlist_head hash[7];
 };
 
 static struct hashtable_dev *device_0_struct, *device_1_struct;
 static dev_t device_0_number, device_1_number;
 struct class *hashtable_class;
 static struct device *hashtable_device_0, *hashtable_device_1;
+pthread_mutex_t lock;
 
 int device_open(struct inode *inode, struct file *file){
 	struct hashtable_dev *hashtable_dev;
-	printk(KERN_INFO "%s opening device", hashtable_dev->device_name);
 	hashtable_dev = container_of(inode->i_cdev, struct hashtable_dev, cdev);
 	file->private_data = hashtable_dev;
 	printk(KERN_INFO "%s device is opened", hashtable_dev->device_name);
 	return 0;
 }
 
-/**
-struct hashtable_object* find_node(struct hlist_head* hash, struct data *object) {
-	struct hashtable_object *obj;
-	hash_for_each_possible(hash, obj, hashtable_pt, object->key ) {
-		if(obj->obj.key == object->key){
-			return obj;
-		}
+struct hashtable_object* find_key(struct hashtable_object *node, struct hashtable_dev *table, struct object_data object) {
+    bool found = false;
+    pthread_mutex_lock(&lock);
+    find_node(table->hash, node, hashtable_pt,object.key) {
+
+        const struct object_data current_node = node->obj;
+        printk(KERN_INFO "Current Node key %d and input key %d\n",current_node.key, object.key);
+        if(current_node.key == object.key) {
+            printk(KERN_INFO "Node Found\n");
+            found = true;
+            break;
+        }
+
 	}
+	pthread_mutex_unlock(&lock);
+	if(found){
+        return node;
+	}
+
 	return NULL;
 }
-**/
+
 
 ssize_t read_hash_table(struct file *file, char *buff, size_t size, loff_t *lt){
-        int pointer, key;
-        char out[sizeof(struct data)];
+
 	struct hashtable_object *node;
 	struct hashtable_dev *table = file->private_data;
-	struct data object;
-	copy_from_user(&object, (struct data*)buff, sizeof(object));	
-	printk(KERN_INFO "Reading from hashtable of device %s", table->device_name);
-	key = object.key;
-	find_node(table->hash, node, hashtable_pt,key) {
-		printk(KERN_INFO "Node Found");		
-		if(node->obj.key == key) break;
-	}
+	struct object_data object;
+
+	copy_from_user(&object, (struct object_data*)buff, sizeof(object));
+	printk(KERN_INFO "Reading from hashtable of device %s\n", table->device_name);
+
+    node = find_key(node,table,object);
 
 	if(node == NULL){
-	printk(KERN_INFO "Node Not Found ");
-           return -1;
+	   printk(KERN_INFO "Node Not Found ");
+           return -EINVAL;
 	}
-	printk(KERN_INFO "Node Found %d", node->obj.key);
-        memcpy(out, &node->obj, sizeof(struct data));
-        for(pointer = 0; pointer<sizeof(struct data);pointer++){
-	  put_user(out[pointer], buff++);
-        }
+
+	printk(KERN_INFO "Node Found with key %d and value %d\n", node->obj.key, node->obj.data);
+	copy_to_user((struct object_data*)buff, &object, sizeof(object));
+
 	return sizeof(node->obj);
 }
 
 ssize_t insert_value(struct file *file, const char *buff, size_t size, loff_t *lt){
-	int key;
 	struct hashtable_object *node;
 	struct hashtable_dev *table = file->private_data;
-	struct data object;
-	copy_from_user(&object, (struct data*)buff, sizeof(object));	
-	printk(KERN_INFO "Adding Value %d", object.key);
-	key = object.key;
-	find_node(table->hash, node, hashtable_pt, key){
-		printk(KERN_INFO "Node *** %d", node->obj.key);
-		if(node->obj.key == key){ 				
-			break;							        
-		}
-	}
+	struct object_data object;
+
+	copy_from_user(&object, (struct object_data*)buff, sizeof(struct object_data));
+
+	node = find_key(node,table,object);
+
 	if(node != NULL) {
-		printk(KERN_INFO "Node with key %d found", object.key);
+		printk(KERN_INFO "Node Found with key %d and value %d\n", node->obj.key, node->obj.data);
 		if(object.data == 0) {
-			printk(KERN_INFO "Deleting node with value %d", object.data);
+			printk(KERN_INFO "Deleting node with value %d\n", object.data);
+			pthread_mutex_lock(&lock);
 			hash_del(&node->hashtable_pt);
+			pthread_mutex_unlock(&lock);
 		}
 		else {
-			printk(KERN_INFO "replacing node with value %d", object.data);
+			printk(KERN_INFO "replacing node with value %d\n", object.data);
+			pthread_mutex_lock(&lock);
 			node->obj.data = object.data;
+			pthread_mutex_unlock(&lock);
 		}
 	}
 	else {
-		printk(KERN_INFO "Adding new node with value %d", object.data);
-		struct hashtable_object element;
-		element.obj.key = object.key;
-		element.obj.data = object.data;
-		hash_add(table->hash, &element.hashtable_pt, element.obj.key);
+		struct hashtable_object *element = kmalloc(sizeof(*element), GFP_KERNEL);
+		INIT_HLIST_NODE(&element->hashtable_pt);
+		element->obj.key = object.key;
+		element->obj.data = object.data;
+		printk(KERN_INFO "Adding new node with value %d and key %d at bucket %d \n", element->obj.data, element->obj.key, hash_min(element->obj.key, HASH_BITS(table->hash)));
+		pthread_mutex_lock(&lock);
+		hash_add_rcu(table->hash, &element->hashtable_pt, element->obj.key);
+		pthread_mutex_unlock(&lock);
 	}
 
-	return 0;
+	return sizeof(buff);
 
 }
 
 int release(struct inode *inode, struct file *file){
 	struct hashtable_dev *table = file->private_data;
-	printk(KERN_INFO "closing device %s", table->device_name);
+	printk(KERN_INFO "closing device %s\n", table->device_name);
 	return 0;
 }
 
-long ioctl_handle(struct file *file, unsigned int command, unsigned long j){
+long ioctl_handle(struct file *file, unsigned int command, unsigned long ioctl_param){
 	struct dump_arg object;
 	int bucket_no, no_nodes;
 	struct hashtable_object *node;
 	struct hashtable_dev *table = file->private_data;
 	switch(command){
 		case IOCTL_DUMP:
-				copy_from_user(&object, (struct dump_arg*)j, sizeof(object));
-				
+                printk(KERN_INFO "Inside IOCTL dump function\n");
+				copy_from_user(&object, (struct dump_arg*)ioctl_param, sizeof(object));
+
 				bucket_no = object.n;
+				if(bucket_no > HASH_SIZE(table->hash)) return -EINVAL;
 				no_nodes = 0;
+				pthread_mutex_lock(&lock);
 				iterate_bucket(table->hash, node, bucket_no, hashtable_pt) {
 					if(no_nodes >= 8) break;
-					object.object_array[no_nodes].data = node->obj.data;
-					object.object_array[no_nodes].key = node->obj.key;
+					const struct object_data current_node = node->obj;
+					printk(KERN_INFO "Dumping new node with value %d and key %d\n", current_node.data, current_node.key);
+					object.object_array[no_nodes].data = current_node.data;
+					object.object_array[no_nodes].key = current_node.key;
 					no_nodes++;
-					object.n = no_nodes;			
 				}
-				if (copy_to_user((struct dump_arg*)j, &object, sizeof(object))) {
-					return -EACCES;				
+				pthread_mutex_lock(&lock);
+				object.no_nodes = no_nodes;
+				if (copy_to_user((struct dump_arg*)ioctl_param, &object, sizeof(object))) {
+					return -EACCES;
 				}
-				break;	
+				break;
 	        default:
-				return -EINVAL;	
+				return -EINVAL;
 	}
-	return 0;
-	
+	return sizeof(ioctl_param);
+
 }
 
 static struct file_operations fop = {
@@ -162,9 +176,15 @@ static struct file_operations fop = {
 	.open = device_open,
 	.write = insert_value,
 	.release = release,
-	.unlocked_ioctl = ioctl_handle,
+	.unlocked_ioctl = ioctl_handle
 };
 
+void init_hashtable(struct hlist_head* table){
+	int i;
+	for(i=0; i<7; i++) {
+		INIT_HLIST_HEAD(&table[i]);
+	}
+}
 int __init hashtable_driver_init(void) {
 
 	int rt;
@@ -184,14 +204,13 @@ int __init hashtable_driver_init(void) {
 	hashtable_class = class_create(THIS_MODULE, CLASS_NAME);
 	device_0_struct = kmalloc(sizeof(struct hashtable_dev),GFP_KERNEL);
 	device_1_struct = kmalloc(sizeof(struct hashtable_dev),GFP_KERNEL);
-	
+
 	if(!device_0_struct || !device_1_struct) {
 	   printk(KERN_INFO "Unable to allocate memory\n"); return -ENOMEM;
 	}
-	
-	hash_init(device_1_struct->hash);
-	hash_init(device_0_struct->hash);
 
+	hash_init(device_0_struct->hash);
+	hash_init(device_1_struct->hash);
 	sprintf(device_0_struct->device_name, DEVICE_0_NAME);
 	sprintf(device_1_struct->device_name, DEVICE_1_NAME);
 
@@ -205,7 +224,7 @@ int __init hashtable_driver_init(void) {
 	   printk(KERN_INFO "Error adding device %s", DEVICE_0_NAME);
 	   return rt;
 	}
-	rt = cdev_add(&device_1_struct->cdev, device_0_number, 1);
+	rt = cdev_add(&device_1_struct->cdev, device_1_number, 1);
 	if(rt < 0){
 	   printk(KERN_INFO "Error adding device %s", DEVICE_1_NAME);
 	   return rt;
@@ -213,6 +232,13 @@ int __init hashtable_driver_init(void) {
 
 	hashtable_device_0 = device_create(hashtable_class, NULL, MKDEV(MAJOR(device_0_number), 0), NULL, DEVICE_0_NAME);
 	hashtable_device_1 = device_create(hashtable_class, NULL, MKDEV(MAJOR(device_1_number), 0), NULL, DEVICE_1_NAME);
+
+
+    if (pthread_mutex_init(&lock, NULL) != 0)
+    {
+        printf("\n mutex init has failed\n");
+        return -1;
+    }
 
 	printk(KERN_INFO "Driver %s is initialised", CLASS_NAME);
 	return 0;
@@ -231,8 +257,8 @@ void __exit exit_device(void){
 	kfree(device_0_struct);
 	kfree(device_1_struct);
 	class_destroy(hashtable_class);
-	
-	printk(KERN_INFO "Existing device");
+
+	printk(KERN_INFO "Removing device");
 
 }
 
