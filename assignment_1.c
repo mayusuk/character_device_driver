@@ -9,6 +9,7 @@
 #include <linux/errno.h>
 #include <linux/uaccess.h>
 #include <linux/string.h>
+#include<linux/mutex.h>
 #include "ioctl_struct.h"
 
 #define DEVICE_0_NAME "ht530_tbl_0"
@@ -20,6 +21,7 @@
 
 #define iterate_bucket(hash, hashtable_node_obj, bucket_no, member)    \
 	hlist_for_each_entry(hashtable_node_obj, &hash[bucket_no], member)
+static DEFINE_MUTEX(hashtable_lock);
 
 static struct hashtable_object{
 	struct object_data obj;
@@ -36,7 +38,6 @@ static struct hashtable_dev *device_0_struct, *device_1_struct;
 static dev_t device_0_number, device_1_number;
 struct class *hashtable_class;
 static struct device *hashtable_device_0, *hashtable_device_1;
-pthread_mutex_t lock;
 
 int device_open(struct inode *inode, struct file *file){
 	struct hashtable_dev *hashtable_dev;
@@ -48,11 +49,10 @@ int device_open(struct inode *inode, struct file *file){
 
 struct hashtable_object* find_key(struct hashtable_object *node, struct hashtable_dev *table, struct object_data object) {
     bool found = false;
-    pthread_mutex_lock(&lock);
+    mutex_lock(&hashtable_lock);
     find_node(table->hash, node, hashtable_pt,object.key) {
 
         const struct object_data current_node = node->obj;
-        printk(KERN_INFO "Current Node key %d and input key %d\n",current_node.key, object.key);
         if(current_node.key == object.key) {
             printk(KERN_INFO "Node Found\n");
             found = true;
@@ -60,7 +60,7 @@ struct hashtable_object* find_key(struct hashtable_object *node, struct hashtabl
         }
 
 	}
-	pthread_mutex_unlock(&lock);
+	mutex_unlock(&hashtable_lock);
 	if(found){
         return node;
 	}
@@ -104,15 +104,15 @@ ssize_t insert_value(struct file *file, const char *buff, size_t size, loff_t *l
 		printk(KERN_INFO "Node Found with key %d and value %d\n", node->obj.key, node->obj.data);
 		if(object.data == 0) {
 			printk(KERN_INFO "Deleting node with value %d\n", object.data);
-			pthread_mutex_lock(&lock);
+			mutex_lock(&hashtable_lock);
 			hash_del(&node->hashtable_pt);
-			pthread_mutex_unlock(&lock);
+			mutex_unlock(&hashtable_lock);
 		}
 		else {
 			printk(KERN_INFO "replacing node with value %d\n", object.data);
-			pthread_mutex_lock(&lock);
+			mutex_lock(&hashtable_lock);
 			node->obj.data = object.data;
-			pthread_mutex_unlock(&lock);
+			mutex_unlock(&hashtable_lock);
 		}
 	}
 	else {
@@ -121,9 +121,9 @@ ssize_t insert_value(struct file *file, const char *buff, size_t size, loff_t *l
 		element->obj.key = object.key;
 		element->obj.data = object.data;
 		printk(KERN_INFO "Adding new node with value %d and key %d at bucket %d \n", element->obj.data, element->obj.key, hash_min(element->obj.key, HASH_BITS(table->hash)));
-		pthread_mutex_lock(&lock);
+		mutex_lock(&hashtable_lock);
 		hash_add_rcu(table->hash, &element->hashtable_pt, element->obj.key);
-		pthread_mutex_unlock(&lock);
+		mutex_unlock(&hashtable_lock);
 	}
 
 	return sizeof(buff);
@@ -149,7 +149,7 @@ long ioctl_handle(struct file *file, unsigned int command, unsigned long ioctl_p
 				bucket_no = object.n;
 				if(bucket_no > HASH_SIZE(table->hash)) return -EINVAL;
 				no_nodes = 0;
-				pthread_mutex_lock(&lock);
+				mutex_lock(&hashtable_lock);
 				iterate_bucket(table->hash, node, bucket_no, hashtable_pt) {
 					if(no_nodes >= 8) break;
 					const struct object_data current_node = node->obj;
@@ -158,7 +158,7 @@ long ioctl_handle(struct file *file, unsigned int command, unsigned long ioctl_p
 					object.object_array[no_nodes].key = current_node.key;
 					no_nodes++;
 				}
-				pthread_mutex_lock(&lock);
+				mutex_lock(&hashtable_lock);
 				object.no_nodes = no_nodes;
 				if (copy_to_user((struct dump_arg*)ioctl_param, &object, sizeof(object))) {
 					return -EACCES;
@@ -232,13 +232,6 @@ int __init hashtable_driver_init(void) {
 
 	hashtable_device_0 = device_create(hashtable_class, NULL, MKDEV(MAJOR(device_0_number), 0), NULL, DEVICE_0_NAME);
 	hashtable_device_1 = device_create(hashtable_class, NULL, MKDEV(MAJOR(device_1_number), 0), NULL, DEVICE_1_NAME);
-
-
-    if (pthread_mutex_init(&lock, NULL) != 0)
-    {
-        printf("\n mutex init has failed\n");
-        return -1;
-    }
 
 	printk(KERN_INFO "Driver %s is initialised", CLASS_NAME);
 	return 0;
