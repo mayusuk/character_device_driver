@@ -1,9 +1,9 @@
 Team -5 
 Name - Mayur Khandave
 
-# character_device_driver
+# character_device_driver and Kprobe
 Character device driver with implementation of hashtable
-
+This character device driver uses internal hashtable implementation in linux for storing data. Also Implemented kprobe to add kprobe in character device driver for fetching Process ID triggering the kprobe
 
 Steps to build code -
 
