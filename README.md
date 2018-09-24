@@ -1,5 +1,5 @@
 Team -5 
-Name - Mayur Khandave  ASU ID - 1215090188
+Name - Mayur Khandave
 
 # character_device_driver
 Character device driver with implementation of hashtable
