@@ -1,8 +1,5 @@
 Team -5 
 Name - Mayur Khandave  ASU ID - 1215090188
-Name - Bhupinder Singh   ASU ID - 1215098443
-
-
 
 # character_device_driver
 Character device driver with implementation of hashtable
